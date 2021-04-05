@@ -3,12 +3,14 @@ title: "Regions project"
 author: "Daniel Antal, CFA"
 date: "4/5/2021"
 output:
-  word_document: default
+  md_document: default
   html_document: default
+  word_document: default
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+## Please modify this file, never the md file.
 ```
 
 ## Strategic aims
