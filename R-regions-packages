@@ -1,0 +1,16 @@
+@Manual{R-regions,
+  title = {regions: Processing Regional Statistics},
+  author = {Daniel Antal},
+  note = {R package version 0.1.6},
+  url = {https://regions.danielantal.eu/},
+  year = {2021},
+}
+
+@Manual{R-retroharmonize,
+  title = {retroharmonize: Ex Post Survey Data Harmonization},
+  author = {Daniel Antal},
+  note = {R package version 0.1.15},
+  url = {https://retroharmonize.dataobservatory.eu/},
+  year = {2021},
+}
+
