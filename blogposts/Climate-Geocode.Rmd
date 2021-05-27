@@ -1,0 +1,93 @@
+---
+title: "Geocoded Individual Data Joined With Environmental Data"
+author: "Daniel Antal, CFA"
+date: "3/5/2021"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-pkgs, message=FALSE, warning=FALSE}
+library(regions)
+library(lubridate)
+library(dplyr)
+
+if ( dir.exists('data-raw') ) {
+  data_raw_dir <- "data-raw"
+} else {
+  data_raw_dir <- file.path("..", "..", "data-raw")
+  }
+```
+
+The first results of our longitudinal table [were difficult to map](post/2021-03-05-retroharmonize-climate/), because the surveys used an obsolete regional coding. We will adjust the wrong coding, when possible, and join the data with the European Environment Agency's (EEA) Air Quality e-Reporting (AQ e-Reporting) data on environmental pollution. We recoded the  annual level for every available reporting stations [*not shown here*] and all values are in μg/m3. The period under observation is 2014-2016. Data file: [https://www.eea.europa.eu/data-and-maps/data/aqereporting-8](https://www.eea.europa.eu/data-and-maps/data/aqereporting-8) (European Environment Agency 2021).
+
+## Recoding the Regions
+
+Recoding means that the boundaries are unchanged, but the country changed the names and codes of regions because there were other boundary changes which did not affect our observation unit. We explain the problem and the solution in greater detail in [our tutorial](http://netzero.dataobservatory.eu/post/2021-03-06-regions-climate/) that aggregates the data on regional levels.
+
+```{r recoding}
+panel <- readRDS((file.path(data_raw_dir, "climate-panel.rds")))
+
+climate_data_geocode <-  panel %>%
+  mutate ( year = lubridate::year(date_of_interview)) %>%
+  recode_nuts()
+```
+
+Let's join the air pollution data and join it by corrected geocodes:
+
+```{r joining}
+load(file.path("data", "air_pollutants.rda")) ## good practice to use system-independent file.path
+
+climate_awareness_air <- climate_data_geocode %>%
+  rename ( region_nuts_codes  = .data$code_2016) %>%
+  left_join ( air_pollutants, by = "region_nuts_codes" ) %>%
+  select ( -all_of(c("w1", "wex", "date_of_interview", 
+                     "typology", "typology_change", "geo", "region"))) %>%
+  mutate (
+    # remove special labels and create NA_numeric_ 
+    age_education = retroharmonize::as_numeric(age_education)) %>%
+  mutate_if ( is.character, as.factor) %>%
+  mutate ( 
+    # we only have responses from 4 years, and this should be treated as a categorical variable
+    year = as.factor(year) 
+    ) %>%
+  filter ( complete.cases(.) ) 
+```
+
+The `climate_awareness_air` data frame contains the answers of `r nrow(climate_awareness_air)` individual respondents. `r paste0(round(mean(climate_awareness_air$serious_world_problems_first)*100,2), "%")` thought that climate change was the most serious world problem and `r paste0(round(mean(climate_awareness_air$serious_world_problems_climate_change)*100,2), "%")` mentioned climate change as one of the three most important global problems.
+
+```{r summary-dataset}
+summary ( climate_awareness_air  )
+```
+Let's see a simple CART tree! We remove the regional codes, because there are very serious differences among regional climate awareness. These differences, together with education level, and the year we are talking about, are the most important predictors of thinking about climate change as the most important global problem in Europe.
+
+```{r rpart}
+# Classification Tree with rpart
+library(rpart)
+
+# grow tree
+fit <- rpart(as.factor(serious_world_problems_first) ~ .,
+   method="class", data=climate_awareness_air %>%
+     select ( - all_of(c("rowid", "region_nuts_codes"))), 
+   control = rpart.control(cp = 0.005))
+
+printcp(fit) # display the results
+plotcp(fit) # visualize cross-validation results
+summary(fit) # detailed summary of splits
+
+# plot tree
+plot(fit, uniform=TRUE,
+   main="Classification Tree: Climate Change Is The Most Serious Threat")
+text(fit, use.n=TRUE, all=TRUE, cex=.8)
+```
+
+```{r save-to-tempdir}
+saveRDS ( climate_awareness_air , file.path(tempdir(), "climate_panel_recoded.rds"), version = 2)
+```
+
+```{r copy-file, eval=TRUE}
+# not evaluated
+saveRDS( climate_awareness_air, file = file.path("data-raw", "climate-panel_recoded.rds"))
+```

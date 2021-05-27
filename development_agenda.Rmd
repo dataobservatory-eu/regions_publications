@@ -1,0 +1,157 @@
+---
+title: "Agenda for packages"
+author: "Daniel Antal, CFA"
+date: "5/25/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Please find this document with publication and blog drafts in [dataobservatory-eu/regions_publications](https://github.com/dataobservatory-eu/regions_publications/).
+
+We have two project boards:
+
+- [Strategic Plan & Publications](https://github.com/dataobservatory-eu/regions_publications/projects/2)
+- [Create blogposts](https://github.com/dataobservatory-eu/regions_publications/projects/1)
+- The master [regions](https://github.com/rOpenGov/regions/) repo moved to rOpenGov.
+
+Very low hanging fruits with big impact:
+
+- [iotables for environment](#iotables-environment)
+- [connecting Eurobarometer to eurostat via regions](#retroharmonize-metadata)
+- [mini package to connect environmental data to eurostat](#spatial-package)
+- [JORS software paper](#publications)
+
+## The importance of metadata
+
+The heart of all my packages is the handling of metadata.  Open data is available, but often not correctly processed. There may be correct metadata that can help the correct re-assembly, but that requires very hard domain-specific expertise both in statistics and the topic area.  
+The iotables package is a clear example for this. 
+
+It downloads data with `eurostat::get_eurostat()` from the warehouse, and then adds the missing metadata map from a Eurostat methodological manual.   It was a hell of a work to do, but it is a very versatile package that is underused. Eurostat has a metadata (vocabulary) for the national accounts abbreviations that it uses, but to put them into matrix algebraic equations, about 2000 abbreviations must fall into the right order to make a meaningful equation on a matrix which has a dimension of 64x64.  It is checked against the Eurostat SIOT manual's [own examples](https://iotables.dataobservatory.eu/articles/germany_1990.html) and a published [UK SIOT with multipliers](https://iotables.dataobservatory.eu/articles/united_kingdom_2010.html) in the unit test to make sure that the matrix equations really do what they should.
+
+If the articles did not disappear from some pkgdown change, I could show to you how I worked a Eurostat statistical manual into a package, page by page, unit test by unit test. 
+
+The [regions](https://regions.dataobservatory.eu/) package is another example.  It utilizes the lost map of regional coding vocabularies and boundary definitions from about 10 Excel files from Eurostat, and thoroughly applies it to Eurostat’s faulty data coding.
+
+The heart of the [retroharmonize package](https://retroharmonize.dataobservatory.eu/) is trying to reconstruct the metadata of surveys files from [Europe](https://retroharmonize.dataobservatory.eu/articles/eurobarometer.html), [Africa](https://retroharmonize.dataobservatory.eu/articles/afrobarometer.html) and the Arab world and systematically re-code them in the exact same way. 
+My programmatic solutions, with loops and even with the matrix algebra are often inefficient and could be greatly improved.  But the real value is that those are run on correct metadata mappings, i.e. they put the randomly placed open data into the right place to be processed into a new product.
+
+I think that any further development on meaningful, quality open data products has two dimension of my packages: putting together the missing, domain specific metadata and the ill-processed data.  
+
+All my packages, and their planned extensions contain vocabulary or translation tables that embed the knowledge how the data should be aggregated. My experience is that I can build these vocabularies 98% with simple NLP applications, programmatically, and then the last mile requires a lot of manual checking, corrections, or very clever programming tricks.  Creating these metadata tables usually requires domain specific knowledge, and they can exponentially increase our output.  To stay with Kasia’s mini package example, if you have a country code to currency code table, then you can match countries to financial statistics and translate them to euros or dollars or pounds.  The more such translation table you have, the more meaningful data transformation and joins are possible.  They are very simple tables, but difficult to build.  What was the abbevation code of Paris department in 1999? And in 2003? And is it possible that it was different in 2006? How about 2021. etc. 
+
+The rest of what my packages do is usually rather simple.  Apply such metadata transformations, auxiliary tables, and test for exceptions, and test for exceptions, and test for exceptions. The retroharmonize is different, it is a very complex package with its own S3 classes that improve on tidyverse's [haven](https://haven.tidyverse.org/), which incorrectly imports SPSS files. With a bit of brush-up, I think we could even send a PR to haven and connect there, which would be a big deal. 
+
+### Examples of metadata
+
+- `Eurostat official abbreviatons of several hundred national accounts variables`: this is supposed to change about every 10-20 years with ESA, and it stored in the iotables package. 
+- `Europe's region names and their official abbrevations, but not the boundaries`: this si currently stored in the regions package, and it changes about every 3 years.
+- `Coding tables of international surveys`: the retroharmonize package tries to re-create them programatically.  Main exceptions are handled in the package.  One possible output of the package is new coding tables that can help the creation of new small area statistics. I.e. the real output of the package is not only new statistical data, but new metadata tables, too.
+
+### Further ideas
+
+- `Global sub-national (regional) region name`, code tables.  I would make a data package for this, and keep it outside of regions, because the table will be huge, but mainly static history.
+- `Sub-national boundaries` are stored in shapefiles.  We could re-count many things as boundaries change, when we have access to the geocodes of the data observations, and we should only create a minimalist package that uses the correct shapefiles.  The rest is written in well-maintained packages, like sf, the only added value on our part would be which shapefile to use if you want to re-calculate French, Estonian or Afghanistani regional data.
+
+## Regions
+
+The [regions](https://regions.dataobservatory.eu/) package deals with some of the problems of sub-national statistics, and it connects to both eurostat and slightly to retroharmonize. 
+
+What are the problems of sub-national statistics:
+1.	Sub-national regions often change names, coding;
+2.	Sub-national regions often change boundaries;
+3.	Many data sources are designed to be national, and decomposition to regional statistics is difficult (small area statistics)
+
+### Sub-national recoding issues
+
+Currently the package handles this very well on NUTS0-1-2-3 levels in the period 1999-2021, and will foresably work well till 2024.  This is a huge addition to the Eurostat package, because Eurostat has no legal mandate to retroactively change the coding of its regional data. That means that whatever we get from the warehouse is likely to contain many obsolete coding.  Member states have the option to recast historical data, but I think that they never do it. (I have never seen member-state recasted regional data, the stable member states data is due to the fact that for example the Benelux countries did not change their internal boundaries.)
+
+Provides very little, ad-hoc support to the more general ISO-3166-2 sub-national definitions.
+
+Kasia’s mini-package, the [currencycode](https://github.com/KKulma/currencycode) solves a similar problem, using the ISO codes of currencies. That package depends on [ISOCodes](https://cran.r-project.org/web/packages/ISOcodes/index.html), which in turn reads in ISO codes from Fedora’s ISO code library.  This is not a good practice, and it does not really work for us. The problem with the [ISOCodes](https://cran.r-project.org/web/packages/ISOcodes/index.html) approach is that it is lacking versions and timestamps.  ISO-3166-2 codes change very frequently, and there is no guarantee that a certain [CF-BB](https://www.iso.org/obp/ui/#iso:code:3166:CF), i.e. Bamingui-Bangoran prefecture [fr official name], Bamïngï-Bangoran [sg official name, latin writing] will mean the same in 2013 than in 2016 and in 2021. 
+
+If you recode with correct 2021 ISO codes a longitudional datasets, you are importing potentially extremely difficult to find logical errors, given that the same code may refer to a differently defined, sized region in different years.
+
+If you take a look at how [Wikipedia does it](https://en.wikipedia.org/wiki/ISO_3166-2), it is a bit better.  I think that we have to go back to the source, which is in this case [ISO.org's API](https://www.iso.org/obp/ui/#search), and read it regularly. Starting maybe with their history, so that we can work out what is correct and what is not in any longitudional dataset.
+
+Here is the problem in two blogposts which could be sharpened in a series to Rblogggers:
+
+- [Retrospective Survey Harmonization Case Study - Climate Awareness Change in Europe 2013-2019.](https://greendeal.dataobservatory.eu/post/2021-03-05-retroharmonize-climate/) - shows the problem; 
+- [Regional Geocoding Harmonization Case Study - Regional Climate Change Awareness Datasets](https://greendeal.dataobservatory.eu/post/2021-03-06-regions-climate/) - handles it to a degree. 
+
+1.	Describe the problem that we are solving in the paper.
+2.	Decide how far we want to take this.  My approach would be to machine read the ISO website, including the history, and provide a history for all global regions for about the last 12 years, and in the future as they change. This would require a huge metadata table that we can publish as a stand-alone data package, maybe outside of CRAN. The history will be large but static.
+
+### Sub-national boundary changes: imputation and re-estimation
+
+This means that not only the name and code of the region changed, but its definition (i.e. boundaries, size, area), too.  Sometimes, we can trace the changes back or forth, for example, when a region is split into two well-defined sub-regions (Central Hungary and Budapest, Central Lithuania and Vilnius recently.) This means that we can create simple, and precise imputation rules when the changes are additive or subtractive, depending on the type of the indicator (is the indicator itself additive, like a population count?)
+
+In other cases, at least without re-counting the data over a boundary, which is outside the scope of this package, we cannot provide precise imputation.  But we can still provide a better imputation than any standard imputation method, because our regional observations are not random and independent. They have a very strong special aspect which means that usually they can be very well estimated, but not with any imputation technique that is non-spatial.  When there is a tiny boundary change in an Estonian region, you do not want to impute the missing new territory with the average European region, you want to impute it with the most similar neighboring Estonian region.
+
+A special case when we have access to the original data and its geocoding, in which case we can simple re-aggregate over the shapefile of Europe’s NUTS boundaries or the ISO-3166-2 boundaries, or whatever boundaries we want. This is usually the case with environmental data (SPEI, tree counts, pollution measurements, etc.)   I would like to make a special package for this, because in fact this is a super-straighforward excercize, and our only added value is that we know which shapefile to use to result in comparable data. 
+
+## Small area statistics
+
+The really big demand for our work is in the creation of sub-national indicators, which are very much sough after and hard to come by, partly, because of the recoding mess. 
+One important use of my retroharmonize package is to use harmonized European surveys, which are used to create European, country level socio-economic statistical indicators, and re-aggragate them to smaller, regional units. 
+
+I have demonstrated that this is possible (the [Retrospective Survey Harmonization Case Study - Climate Awareness Change in Europe 2013-2019.](https://greendeal.dataobservatory.eu/post/2021-03-05-retroharmonize-climate/) blogpost is one proof, but we actually used this approach earlier in our [PLOS One publication](https://dataandlyrics.com/publication/scholarly_pirate_libraries_2020/). But my approach so far mainly focused on the metadata aspect.  The data aspect is served with many R packages, usually developed for ecological use, and not socio-economic, but the metadata element is never served, so actually getting to load the data into those packages is the real challenge.
+
+### The metadata aspect {#retroharmonize-metadata}
+
+So far, I used Eurobarometer, Afrobarometer, and Arab Barometer to test the creation of small area statistics from harmonized, open access survey data.  While Afrobarometer works perfectly with ISO-3166-2, Eurobarometer tends to have a 95% coding error in the regional metadata of the raw survey files, and Arab Barometer is generally a mess.
+
+This could be resolved 98% programmatically  and 2% manually, because the coding errors are all human entry errors. I have a code that already collected out all mis-spellings of regions (Brussels, Brussel, Bruxelles, Reg. Brussel, Regio Bruxelles, and the like, Belgium is my favourite, because they sometimes use the Flemish, French or English names, and apparently the Kantar people in Brussels cannot spell anything in Flemish, a language that at least I can read; Estonia and the Nordics have wonderful character coding challenges, not to mention Bulgaria and Greece with their non-Latin names.) This is what I did for Belgium only in [this blogpost](https://greendeal.dataobservatory.eu/post/2021-04-23-belgium-flood-insurance/), but generally 98% of Europe could be covered, the rest is likely to be manual exception codeing.
+
+Even only partially finishing this, stopping at a 99% percent level, we with a 2-3 days of work, and lots of manual checking we could clear out Eurobarometer for 2010-2020 and create tons of exciting new statistical products.
+
+The second drawback of my approach is that it uses and almost naïve re-weighting of the samples.  The Eurobarometer is designed to be representative on the level of the Netherlands, and it is not necessarily representative for the province of Zuid-Holland, where I live.  I do slight correction in the weights, but the correct approach would be to use some small area resampling techniques. 
+
+### The actual data aspect: small area estimates
+
+That is not the role of retroharmonize, for sure, but there are many great packages and reviews for small area statistics; basically they work usually with resampling, and utilizing non-space specific information.  My goal would be to chose one or two, and create a simple, API-like interface for them for the purpose we want to use them.  
+
+They are usually employed in ecology and biology models, and their description, parameter names are related to ecological models, they are extremely hard to work with for a socio-economics person, but what they do is exactly what Eurostat or the Asian Development Bank or the Australian Statistics Office would do for small area statistics.
+
+### Publications {#publications}
+
+Rough plan:
+
+1. A new release for regions with improved usability.
+
+2. A conversion tool to Eurobarometer and NUTS and new datasets.
+
+3. A 'software paper' in the [Journal of Open Research](https://openresearchsoftware.metajnl.com/). We can be publication ready in 1-2 months. See a subfolder for a template.
+
+4. Acknowledgment from a national statistical authority. For example, an EU statistical authority publishes our NUTS tables for information purposes. Acknowledgements from scientific users (our data passed peer-review in various disciplines.)
+
+5. [Journal of Statistical Software](https://www.jstatsoft.org/index).  This will require a longer time, and several validation points for our data.  See the subfolder for a template.
+
+5. Acknowledgement from Eurostat.
+
+
+I would like to involve in the publication work our fantastic curator, [Caterina Sganga](https://music.dataobservatory.eu/author/caterina-sganga/), who is a legal scholar on open data; and she reminded me how the currrent open data regulation is focusing on data and not metadata.  And my entire work with the three packages shows that open data does not work because metadata is not open, or open but patchy. 
+
+
+## Spatial package {#spatial-package}
+
+One problem with the environmental open data is that usually it is aggregated over a different geographical entity than what we would use in socio-economic data.  For example, it is aggregated over a habitat, or a country, but not over the area that socio-economic people woudl use, such as Europe's NUTS regions definitions.  
+
+This is actually extremely easy to solve. In our [PLOS One publication](https://dataandlyrics.com/publication/scholarly_pirate_libraries_2020/) article we solved this, as used the data of a Russian book torrent site with geolocated IP addresses that we wanted to match with Eurostat's regional data. 
+
+Practically we need to use the [sf](https://github.com/r-spatial/sf/issues/) package and the [sp package](https://github.com/edzer/sp/), but with correct versions of correct shapefiles. To match official European statistics, we need to use the NUTS2010, NUTS2013, NUTS2016, NUTS2016 versions of the European NUTS and LAU boundaries.  For a global outreach we have the usual problem: OSM has ISO-3166-2 open source boundaries, but not necessarily versioned, and it can be a hit-and-miss in some developing countries. 
+
+I think that in this case this can be a mini package that uses the correct shapefiles for the correct time-aspect of any data, and provides a simple interface and a tutorial. Both [sf](https://github.com/r-spatial/sf/issues/) and [sp](https://github.com/edzer/sp/) are extremely well-served packages, though [sf](https://github.com/r-spatial/sf/issues/) is not so mature and [sp](https://github.com/edzer/sp/) can be daunting. 
+
+I think that we just need a nice name and a logo, this is almost a non-issue and can be a very powerful tool.
+
+## iotables for environment {#iotables-environment}
+
+The iotables is a very niche, narrow-focus package and works great.  Adding environmental impact variables is a very trivial task, and as soon as I recover the lost vignettes, I'll show how, basically the same data wrangling must be performed on, for example, [Air emissions accounts by NACE Rev. 2 activity (env_ac_ainah_r2)	](https://ec.europa.eu/eurostat/web/environment/data/database?p_p_id=NavTreeportletprod_WAR_NavTreeportletprod_INSTANCE_uboz0yoELYYd&p_p_lifecycle=0&p_p_state=pop_up&p_p_mode=view&_NavTreeportletprod_WAR_NavTreeportletprod_INSTANCE_uboz0yoELYYd_nodeInfoService=true&nodeId=243347), that I used for Croatia's employment statistics pre-accession. 
+
+The air emissions data must be put into a conforming vector that can be fed into a matrix equation in the package, and loop it through all years and countries.  
+
+
+

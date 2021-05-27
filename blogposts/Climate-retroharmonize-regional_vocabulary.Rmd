@@ -1,0 +1,389 @@
+---
+title: Collecting All Eurobarometer Regional Coding Information From Climate-Relevant
+  GESIS Files
+author: "Daniel Antal, CFA"
+date: "7/4/2021"
+---
+
+Retrospective survey harmonization comes with many challenges, as we have shown in the [introduction](http://netzero.dataobservatory.eu/post/2021-03-04_retroharmonize_intro/) to this tutorial case study. In this example, we will work with Eurobarometer’s data. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Please use the development version of [retroharmonize](https://retroharmonize.dataobservatory.eu/):
+
+```{r install-retroharmonize, eval=FALSE}
+devtools::install_github("antaldaniel/retroharmonize")
+```
+
+```{r load-pkg, echo=FALSE}
+library(retroharmonize)
+library(dplyr)       # this is necessary for the example 
+library(lubridate)   # easier date conversion
+library(stringr)     # You can also use base R string processing functions 
+library(purrr)       # functional programing
+```
+
+## Get the Data
+
+`retroharmonize` is not associated with Eurobarometer, its creators (Kantar), or its archivists (GESIS). We assume that you have acquired the necessary files from GESIS after carefully reading their terms and that you have placed them on a path that you call gesis_dir. The precise documentation of the data we use can be found in this supporting [blogpost](http://netzero.dataobservatory.eu/post/2021-03-04-eurobarometer_data/). To reproduce this blogpost, you will need `ZA5877_v2-0-0.sav`, `ZA6595_v3-0-0.sav`,  `ZA6861_v1-2-0.sav`, `ZA7488_v1-0-0.sav`, `ZA7572_v1-0-0.sav` in a directory that you have named `gesis_dir`.
+
+```{r read-files, eval=FALSE}
+# Not run in the blogpost. In the repo we have a saved version.
+climate_change_files <- c("ZA5877_v2-0-0.sav", "ZA6595_v3-0-0.sav",  "ZA6861_v1-2-0.sav", 
+                          "ZA7488_v1-0-0.sav", "ZA7572_v1-0-0.sav")
+
+eb_waves <- read_surveys(file.path(gesis_dir, climate_change_files), .f='read_spss')
+
+if (dir.exists("data-raw")) {
+  save ( eb_waves,  file = file.path("data-raw", "eb_climate_change_waves.rda") )
+}
+```
+
+```{r load-existing-data}
+if ( file.exists( file.path("data-raw", "eb_climate_change_waves.rda") )) {
+  load (file.path( "data-raw", "eb_climate_change_waves.rda" ) )
+} else {
+  load (file.path("..", "..",  "data-raw", "eb_climate_change_waves.rda") )
+}
+```
+
+The `eb_waves` nested list contains five surveys imported from SPSS to the survey class of [retroharmonize](https://retroharmonize.dataobservatory.eu/articles/labelled_spss_survey.html). The survey class is a data.frame that retains important metadata for further harmonization.
+
+```{r wave-contents}
+document_waves (eb_waves)
+```
+
+Beware of the object sizes. If you work with many surveys, memory-efficient programming becomes imperative. We will be subsetting whenever possible.
+
+## Metadata analysis
+
+As noted before, be prepared to work with nested lists. Each imported survey is nested as a data frame in the `eb_waves` list. 
+
+```{r metadata, echo=FALSE, messag=FALSE, warning=FALSE}
+eb_climate_metadata <- lapply ( X = eb_waves, FUN = metadata_create )
+eb_climate_metadata <- do.call(rbind, eb_climate_metadata)
+```
+
+## Metadata: Protocol Variables
+
+Eurobarometer refers to certain metadata elements, like interviewee cooperation level or the date of a survey interview as protocol variables. Let's start here. This will be our template to harmonize more and more aspects of the five surveys (which are, in fact, already harmonizations of about 30 surveys conducted in a single 'wave' in multiple countries.)
+
+```{r metadata-protocol}
+# select variables of interest from the metadata
+eb_protocol_metadata <- eb_climate_metadata %>%
+  filter ( .data$label_orig %in% c("date of interview") |
+             .data$var_name_orig == "rowid")  %>%
+  suggest_var_names( survey_program = "eurobarometer" )
+
+# subset and harmonize these variables in all nested list items of 'waves' of surveys
+interview_dates <- harmonize_var_names(eb_waves, 
+                                       eb_protocol_metadata )
+
+# apply similar data processing rules to same variables
+interview_dates <- lapply (interview_dates, 
+                      function (x) x %>% mutate ( date_of_interview = as_character(.data$date_of_interview) )
+                      )
+
+# join the individual survey tables into a single table 
+interview_dates <- as_tibble ( Reduce (rbind, interview_dates) )
+
+# Check the variable classes.
+
+vapply(interview_dates, function(x) class(x)[1], character(1))
+```
+
+This is our sample workflow for each block of variables.  
+
+1. Get a unique identifier. 
+2. Add other variables. 
+3. Harmonize the variable names.
+4. Subset the data, leaving out anything that you do not harmonize in this block.  
+5. Apply some normalization in a nested list.
+6. When the variables are harmonized to have the same names and class, merge them into a data.frame-like `tibble` object.
+
+Now finish the harmonization. `Wednesday, 31st October 2018` should become a Date type `2018-10-31`.
+
+```{r protocol, message=FALSE}
+require(lubridate)
+harmonize_date <- function(x) {
+  x <- tolower(as.character(x))
+  x <- gsub("monday|tuesday|wednesday|thursday|friday|saturday|sunday|\\,|th|nd|rd|st", "", x)
+  x <- gsub("decemberber", "december", x) # all those annoying real-life data problems!
+  x <- stringr::str_trim (x, "both")
+  x <- gsub("^0", "", x )
+  x <- gsub("\\s\\s", "\\s", x)
+  lubridate::dmy(x) 
+}
+
+interview_dates <- interview_dates %>%
+  mutate ( date_of_interview = harmonize_date(.data$date_of_interview) )
+
+vapply(interview_dates, function(x) class(x)[1], character(1))
+```
+
+To avoid duplication of row IDs in surveys that may not be unique in _different_ surveys, we created a simple, sequential ID for each survey, including the ID of the original file.
+
+```{r sample-dates}
+set.seed(2021)
+sample_n(interview_dates, 6)
+```
+
+
+After this type-conversion problem let's see an issue when an original SPSS variable can have two meaningful R representations.
+
+## Metadata: Geographical information 
+
+Let's continue with harmonizing geographical information in the files. In this example, `var_name_suggested` will contain the harmonized variable name. It is likely that you will have to make this call after carefully reading the original questionnaires and codebooks.
+
+```{r regmetadata}
+eb_regional_metadata <- eb_climate_metadata %>%
+  filter ( grepl( "rowid|isocntry|^nuts$|^p7", .data$var_name_orig) ) %>%
+  suggest_var_names( survey_program = "eurobarometer" )
+
+```
+
+`harmonize_var_names()` takes all variables in the subsetted, geographical metadata table, and brings them to the harmonized `var_name_suggested` name. The function subsets the surveys to avoid the presence of non-harmonized variables. All regional NUTS codes become `geo` in our case:
+
+```{r harmonize-geography-vars}
+geography <- harmonize_var_names(eb_waves, 
+                                 eb_regional_metadata)
+```
+
+If you are used to working with single survey files, you are likely to work in a tabular format, which easily converts into a data.frame-like object. In our example, we use tidyverse's `tibble`. However, when working with longitudinal data, it is far simpler to work with nested lists, because tables usually have different dimensions (neither the rows corresponding to observations or the columns are the same across all survey files).
+
+In the nested list, each list element is a single, tabular-format survey. In fact, the surveys are in retroharmonize's [survey](https://retroharmonize.dataobservatory.eu/reference/survey.html) class, which is a rich tibble that contains the metadata and the processing history of the survey.
+
+The regional information in the Eurobarometer files is contained in the `nuts` variable.  We want to keep both the original labels and values. The original values are the region's codes, and the labels are the names. The easiest and fastest solution is the base R `lapply` loop.
+
+```{r process-geography-vars}
+
+# The character representation keeps the original SPSS coding.
+geography_char <- lapply ( geography, 
+                      function (x) x %>% mutate( across(everything(), as.character))
+                      )  
+
+# The label representation keeps the original SPSS labeling.
+geography_label <- lapply ( geography, 
+                      function (x) x %>% mutate( across(everything(), as_character ))
+                      )  
+
+```
+
+Because each table has exactly the same columns, we can simply use `rbind()` and reduce the list to a modern `data.frame`, i.e. a `tibble`. 
+
+```{r join-geography-chars, echo=FALSE }
+geography_chars <- as_tibble ( Reduce (full_join, geography_char) )
+```
+
+Let's see a dozen cases: 
+
+```{r check-geography-vars}
+set.seed(2021)           # to see the same sample
+sample_n(geography_chars, 12)
+```
+
+The idea is that we do similar variable harmonization block by block, and eventually we will join them together.  Next step: socio-demography and weights.
+
+
+```{r join-geography-labels, echo=FALSE }
+geography_labels <- as_tibble ( Reduce (full_join, geography_label) )
+```
+
+## Creating a code table
+
+First let's take all coding information from the contents of the SPSS variables:
+
+```{r character-representation}
+require(tidyr)
+characters <- geography_chars %>% 
+  separate ( data = ., col = rowid,
+             into = c("survey_id", "version", "unique_id"), 
+             sep = "_") %>%
+  select ( -all_of("unique_id")) %>%
+  distinct_all() %>%
+  pivot_longer( cols = -all_of(c( "survey_id", "version", "isocntry", "region_nuts_codes")), 
+                names_to = "variable_name", 
+                values_to = "character_value") %>%
+  filter (  # remove inappropriate values - referring to missing values due to questionnaire filtering, etc.
+            ! grepl( "^Inap|99", character_value) ) %>%
+  filter (  # remove missing values from the original code, these are empty values from the full_join
+            ! is.na(character_value))
+```
+```{r}
+set.seed(2021)
+sample_n(characters, 6)
+```
+
+The character values in fact contain no useful information, so we reduce this table to keep all variations of the region_nuts_codes. 
+
+```{r}
+characters %>% 
+  select ( -.data$character_value ) %>%
+  distinct_all(  )
+```
+
+The variable name contains misleading information, so we should not rely on it, either.  
+
+Then let's take their labels, when they exist:
+
+```{r use-value-labels}
+labels <- geography_labels %>% 
+  separate ( data = ., col = rowid,
+             into = c("survey_id", "version", "unique_id"), 
+             sep = "_") %>%
+  select ( -all_of("unique_id") ) %>%
+  distinct_all() %>%
+  pivot_longer( cols = -all_of(c( "survey_id", "version", "isocntry", "region_nuts_codes")), 
+                names_to = "variable_name", 
+                values_to = "value_label") %>%
+  filter ( ! is.na(  value_label) ) %>%
+  filter ( ! grepl("^Inap", value_label) ) %>%
+  rename ( # the label representation keeps the variable labels; the labels of the code are the names 
+           region_nuts_names  = region_nuts_codes
+           )
+
+```
+
+And join this information:
+
+```{r join-data, echo=FALSE}
+coding_information <- characters %>% 
+  select ( -all_of(c("variable_name", "character_value"))) %>%
+  distinct_all( 
+    #remove duplication due to the removed columns 
+    ) %>%
+  full_join ( labels %>%
+                distinct_all(), 
+              by = c("survey_id", "version", "isocntry")
+              ) 
+```
+
+At this point, we see duplications, because sometimes we find coding information in one survey for both `NUTS1` and `NUTS2`.
+
+```{r}
+consistent_coding_information <- coding_information %>%
+  filter ( nchar(region_nuts_codes) == 4 & grepl("2", .data$variable_name) | 
+           nchar(region_nuts_codes) == 3 & grepl("1", .data$variable_name) | 
+           nchar(region_nuts_codes) == 5 & grepl("3", .data$variable_name) ) 
+
+# luckily there is no inconsistent information present 
+inconsistent_coding_information <- consistent_coding_information %>%
+  anti_join ( coding_information, 
+              by = c("survey_id", "version", "isocntry", "region_nuts_codes",
+                     "region_nuts_names", "variable_name", "value_label"))
+```
+
+
+
+
+
+
+The table has some problems. 
+
+## Duplicate rows
+
+
+
+## Technical coding is needed
+
+### Malta 
+
+While Malta has two NUTS-3 regions, no regional information can be found in the GESIS datasets. We suggest to use `MT00` and `MT0` technical codes.  It is not possible to reconstruct Malta's data to `MT001` and `MT002`. 
+
+```{r malta}
+mt_metadata <- coding_information %>% filter ( isocntry == "MT" ) %>%
+  distinct_all()
+mt_metadata
+```
+
+### Luxembourg
+
+Luxembourg does not have NUTS divisions, but the GESIS datafile contains regional information. This typology does not correspond with Luxembourgs ISO-3166-2 divisions, i.e. the 12 cantons. We suggest to use `LU0` and `LU00` and `LU000` technical codes.
+
+```{r luxembourg}
+lu_metadata <- coding_information %>% filter ( isocntry == "LU" ) %>%
+  distinct_all()
+
+lu_metadata
+```
+
+## Final tables
+
+```{r}
+final_coding_information <- coding_information %>%
+  mutate ( region_nuts_codes = case_when (
+    .data$isocntry == "LU" ~ "LU000",  # we are certain because LU has no NUTS divisions
+    .data$isocntry == "MT" ~ "MT00",    # Kantar does not follow Malta's NUTS3, 
+    TRUE ~ .data$region_nuts_codes
+  )) %>%
+  filter ( nchar(region_nuts_codes) == 4 & grepl("2", .data$variable_name) | 
+           nchar(region_nuts_codes) == 3 & grepl("1", .data$variable_name) | 
+           nchar(region_nuts_codes) == 5 & grepl("3", .data$variable_name) |
+           .data$isocntry %in% c("LU", "CY", "MT", "EE")) 
+```
+
+
+```{r validate-nuts}
+require(regions)
+
+code_table_validated <- final_coding_information %>%
+  mutate ( # Whatever nuts codes we have, let's see if they are valid in the last 3 NUTS definitions
+           # Bug fix for regions: return character vector
+           valid_2016 = as.character(regions::validate_geo_code(.data$region_nuts_codes, nuts_year = 2016)),
+           valid_2013 = as.character(regions::validate_geo_code(.data$region_nuts_codes, nuts_year = 2013)),
+           valid_2010 = as.character(regions::validate_geo_code(.data$region_nuts_codes, nuts_year = 2010))
+           )
+
+```
+
+As we can see we have all sorts of problems here. The regional coding is on either `NUTS1`, `NUTS2` or `NUTS3` level, and either follows the `NUTS2010` or the `NUTS2013` typology's coding. 
+
+```{r show-sample-results}
+set.seed(1997)
+sample_n(code_table_validated %>% 
+           select ( all_of(c("region_nuts_codes")), 
+                    starts_with("valid")
+           ), 12)
+```
+
+```{r finalize}
+all_labelling <- code_table_validated %>%
+  select ( -all_of(c("version" )) ) %>%
+  distinct_all() %>%
+  #filter ( isocntry == "BE") %>%
+  unite ( col = survey_var, c("survey_id", "variable_name")) %>%
+  select ( all_of(c("survey_var", "isocntry", "region_nuts_codes", "value_label")) ) %>%
+  distinct_all () %>%
+  tibble::rownames_to_column() %>%
+  pivot_wider ( names_from = "survey_var", 
+                values_from = "value_label" ) %>%
+  pivot_longer ( -all_of(c( "rowname", "isocntry", "region_nuts_codes")), 
+                 names_to = "survey_var",
+                 values_to = "region_nuts_labels") %>%
+  filter (!is.na( .data$region_nuts_labels)) %>%
+  left_join ( code_table_validated %>%
+                select ( all_of(c("region_nuts_codes")),
+                         starts_with("valid")
+                         ), by = "region_nuts_codes"
+  )
+```
+
+What are the problems?  In Estonia we need to recode, because almost only the country code is present. For example, 	
+Laene-Eesti (Western Estonia) is `EE004` Lääne-Eesti. When a region cannot be associated with a valid NUTS3 code, create an invalid, technical code.  For example, Tallinn should be `EE00T` (5 characters). This makes sure that when we aggregate on `NUTS0`, `NUTS1` or `NUTS2` levels, it will be correctly assigned to `EE`, `EE0` and `EE00`. 
+
+```{r EE-outtake}
+ee <- all_labelling %>%
+  filter ( .data$isocntry == "EE")
+
+ee
+```
+
+Cyprus probably should be treated similarly to Malta and Luxembourg, for different reasons -- because of the country's division, the NUTS regions were not yet established.
+
+```{r save-all}
+write.csv(all_labelling, file.path('data-raw', 'eurostat-all_labelling.csv'), row.names=FALSE)
+saveRDS(all_labelling, file.path('data-raw', 'eurostat-all_labelling.rds'))
+```
+

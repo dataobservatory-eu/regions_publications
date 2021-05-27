@@ -32,8 +32,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 - Create an `R-regions-literature.bib` for the references we want to use in the publications.
 
-
-
 - Create a reproducible workflow to import LAU/NUTS correspondence tables. 
 
 - Review and test the `validate_geo_code()` function - the manual checks will have to be published in vignette or some other form, and be available for future publication reviewers.

@@ -1,0 +1,64 @@
+---
+title: "Joining Harmonized Attitude Data With Air Pollution Data"
+author: "Daniel Antal, CFA"
+date: "3/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r pkg-load, message=FALSE}
+library(dplyr)
+```
+
+In the previous blogposts we showed how to put together more than a hundred surveys conducted in about 30 countries over four years to find out about people's changing perception of the severity of climate change. We are now going to join a very different dataset, to see if we can see correlation, or even causation between people's perception of climate change and environmental degradation and their attitudes and self-reported actions.
+
+The source of our air quality data is the European Environment Agency's (EEA) Air Quality e-Reporting (AQ e-Reporting) data on environmental pollution (particulate matter 2.5 and 10), which is recorded on the annual level for every available reporting stations and all values are in μg/m3. The period under observation is 2014-2016. 
+
+You can get the data from European Environment Agency [here](https://www.eea.europa.eu/data-and-maps/data/aqereporting-8). _Citation: European Environment Information and Observation Network (Eionet)_
+
+## Load the Data
+
+
+```{r}
+load(file.path("data", "air_pollutants.rda")) ## good practice to use system-independent file.path
+climate_panel_recoded <- readRDS( file.path("data-raw", "climate-panel_recoded_agr.rds") )
+names ( climate_panel_recoded)
+```
+
+```{r joining }
+
+regional_climate_dataset <- air_pollutants %>%
+  rename ( code_2016 = .data$region_nuts_codes) %>%
+  left_join ( climate_panel_recoded, by = 'code_2016' ) 
+
+summary(regional_climate_dataset)
+  
+```
+
+```{r}
+glm ( climate_first ~ 1- o3 + pm10 + BaP + year, data = regional_climate_dataset)
+
+# Classification Tree with rpart
+library(rpart)
+
+# grow tree
+fit <- rpart(climate_mentioned ~ o3 + pm10 + BaP + year,
+   method="class", data=regional_climate_dataset)
+
+printcp(fit) # display the results
+plotcp(fit) # visualize cross-validation results
+summary(fit) # detailed summary of splits
+
+# plot tree
+plot(fit, uniform=TRUE,
+   main="Classification Tree for Kyphosis")
+text(fit, use.n=TRUE, all=TRUE, cex=.8)
+
+# create attractive postscript plot of tree
+post(fit, file = "c:/tree.ps",
+   title = "Classification Tree for Kyphosis")
+```
+
